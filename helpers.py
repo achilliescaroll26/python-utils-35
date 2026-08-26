@@ -1,47 +1,52 @@
-import functools
-import time
-import logging
+from typing import Any, Callable, Dict, List, TypeVar, cast
 
-logger = logging.getLogger(__name__)
+T = TypeVar('T')
 
-def memoize_with_expiry(expiration):
-    def decorator(func):
-        cache = {}
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            key = (args, tuple(kwargs.items()))
+
+def recursive_flatten(nested_list: List[Any]) -> List[Any]:
+    """Flatten an arbitrarily nested list structure using a generator approach.
+    
+    Args:
+        nested_list: The list containing potential sub-lists.
+        
+    Returns:
+        A single-level list with all nested elements extracted.
+    """
+    def _flatten(items: List[Any]) -> Any:
+        for item in items:
+            if isinstance(item, list):
+                yield from _flatten(item)
+            else:
+                yield item
+                
+    return list(_flatten(nested_list))
+
+
+def memoize_with_ttl(ttl_seconds: int = 60) -> Callable[[Callable[..., T]], Callable[..., T]]:
+    """Decorator to cache function results with a time-to-live expiration strategy.
+    
+    Args:
+        ttl_seconds: Time to live for cache entries in seconds.
+        
+    Returns:
+        A decorator wrapping the target function.
+    """
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        cache: Dict[tuple, tuple[Any, float]] = {}
+        import time
+        
+        def wrapper(*args: Any, **kwargs: Any) -> T:
             now = time.time()
+            key = (args, frozenset(kwargs.items()))
+            
             if key in cache:
                 result, timestamp = cache[key]
-                if now - timestamp < expiration:
-                    return result
+                if now - timestamp < ttl_seconds:
+                    return cast(T, result)
+                    
             result = func(*args, **kwargs)
             cache[key] = (result, now)
             return result
+            
         return wrapper
     return decorator
-
-def batch_iterable(iterable, size):
-    iterator = iter(iterable)
-    while True:
-        batch = [item for _, item in zip(range(size), iterator)]
-        if not batch:
-            break
-        yield batch
-
-def safe_get(nested_dict, *keys, default=None):
-    current = nested_dict
-    for key in keys:
-        if isinstance(current, dict) and key in current:
-            current = current[key]
-        else:
-            return default
-    return current
-
-class DynamicNamespace:
-    def __init__(self, **kwargs):
-        self.__dict__.update(kwargs)
-
-    def __repr__(self):
-        items = f"{k}={v!r}" for k, v in self.__dict__.items()
-        return f"DynamicNamespace({', '.join(items)})"
