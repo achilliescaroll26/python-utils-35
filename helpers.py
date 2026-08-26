@@ -1,52 +1,38 @@
-from typing import Any, Callable, Dict, List, TypeVar, cast
+from functools import lru_cache
+import sys
 
-T = TypeVar('T')
+@lru_cache(maxsize=4096)
+def cached_attribute_getter(obj_id: int, attr_name: str, default=None):
+    obj = sys.modules.get(str(obj_id))
+    if obj is None:
+        return default
+    return getattr(obj, attr_name, default)
 
-
-def recursive_flatten(nested_list: List[Any]) -> List[Any]:
-    """Flatten an arbitrarily nested list structure using a generator approach.
-    
-    Args:
-        nested_list: The list containing potential sub-lists.
-        
-    Returns:
-        A single-level list with all nested elements extracted.
-    """
-    def _flatten(items: List[Any]) -> Any:
-        for item in items:
-            if isinstance(item, list):
-                yield from _flatten(item)
+def fast_flatten(nested_sequence):
+    iterator = iter(nested_sequence)
+    stack = [iterator]
+    while stack:
+        try:
+            item = next(stack[-1])
+            if isinstance(item, (list, tuple, set)):
+                stack.append(iter(item))
             else:
                 yield item
-                
-    return list(_flatten(nested_list))
+        except StopIteration:
+            stack.pop()
 
-
-def memoize_with_ttl(ttl_seconds: int = 60) -> Callable[[Callable[..., T]], Callable[..., T]]:
-    """Decorator to cache function results with a time-to-live expiration strategy.
+class OptimizedRegistry:
+    __slots__ = ('_store', '_version')
     
-    Args:
-        ttl_seconds: Time to live for cache entries in seconds.
-        
-    Returns:
-        A decorator wrapping the target function.
-    """
-    def decorator(func: Callable[..., T]) -> Callable[..., T]:
-        cache: Dict[tuple, tuple[Any, float]] = {}
-        import time
-        
-        def wrapper(*args: Any, **kwargs: Any) -> T:
-            now = time.time()
-            key = (args, frozenset(kwargs.items()))
-            
-            if key in cache:
-                result, timestamp = cache[key]
-                if now - timestamp < ttl_seconds:
-                    return cast(T, result)
-                    
-            result = func(*args, **kwargs)
-            cache[key] = (result, now)
-            return result
-            
-        return wrapper
-    return decorator
+    def __init__(self):
+        self._store = {}
+        self._version = 0
+    
+    def register(self, key: str, value):
+        self._store[key] = value
+        self._version += 1
+    
+    def get(self, key: str):
+        return self._store.get(key)
+
+registry_instance = OptimizedRegistry()
