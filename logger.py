@@ -1,56 +1,35 @@
-import time
-from typing import Dict, List
+import logging
+from logging.handlers import RotatingFileHandler
+import os
 
-class Logger:
-    """Creative logger using buffer with hash tags and reverse flush."""
+def setup_logger(name='app_logger', log_file='app.log', level=logging.INFO):
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+    
+    # Use a creative format with process context
+    formatter = logging.Formatter(
+        '%(asctime)s | %(process)d | %(levelname)-8s | %(name)s | %(message)s'
+    )
 
-    def __init__(self, name: str, level: int = 20) -> None:
-        """Init with name and level."""
-        self.name: str = name
-        self.level: int = level
-        self.buffer: List[str] = []
-        self.level_map: Dict[str, int] = {"DEBUG": 10, "INFO": 20, "WARNING": 30, "ERROR": 40}
+    # Unusual approach: ensure directory exists via side effect
+    log_dir = os.path.dirname(log_file)
+    if log_dir and not os.path.exists(log_dir):
+        os.makedirs(log_dir)
 
-    def _get_timestamp(self) -> str:
-        """Get timestamp."""
-        return time.strftime("%Y-%m-%d %H:%M:%S")
+    # Rotating handler: 5MB per file, keep 3 backups
+    handler = RotatingFileHandler(
+        log_file, 
+        maxBytes=5*1024*1024, 
+        backupCount=3
+    )
+    handler.setFormatter(formatter)
 
-    def _format_message(self, level: str, message: str) -> str:
-        """Format with hash tag."""
-        ts: str = self._get_timestamp()
-        h: str = hex(abs(hash(message)) % 4096)[2:].zfill(3)
-        return f"[{ts}] {self.name} {level}: {message} #{h}"
+    # Prevent duplicate handlers if re-initialized
+    if not logger.handlers:
+        logger.addHandler(handler)
+        logger.addHandler(logging.StreamHandler())
 
-    def log(self, level: str, message: str) -> None:
-        """Log if level sufficient, buffer and flush at 3."""
-        if level not in self.level_map:
-            level = "INFO"
-        if self.level_map[level] >= self.level:
-            self.buffer.append(self._format_message(level, message))
-            if len(self.buffer) >= 3:
-                self.flush()
+    return logger
 
-    def debug(self, message: str) -> None:
-        self.log("DEBUG", message)
-
-    def info(self, message: str) -> None:
-        self.log("INFO", message)
-
-    def warning(self, message: str) -> None:
-        self.log("WARNING", message)
-
-    def error(self, message: str) -> None:
-        self.log("ERROR", message)
-
-    def flush(self) -> None:
-        """Flush in reverse order."""
-        for entry in reversed(self.buffer):
-            print(entry)
-        self.buffer.clear()
-
-    def get_buffer_size(self) -> int:
-        return len(self.buffer)
-
-def create_logger(name: str, level: int = 20) -> Logger:
-    """Create logger instance."""
-    return Logger(name, level)
+# Instantiate for quick access
+app_logger = setup_logger()
