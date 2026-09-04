@@ -1,46 +1,37 @@
 import functools
-import logging
 import time
-from typing import Callable, Any
 
-logger = logging.getLogger(__name__)
+class memoize_with_expiry:
+    def __init__(self, ttl=60):
+        self.ttl = ttl
+        self.cache = {}
 
-class ExecutionContext:
-    def __init__(self, name: str):
-        self.name = name
-        self.start = 0
-
-    def __enter__(self):
-        self.start = time.perf_counter()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        duration = time.perf_counter() - self.start
-        logger.info(f"context {self.name} finished in {duration:.4f}s")
-
-def silent_retry(attempts: int = 3, delay: float = 0.5):
-    def decorator(func: Callable):
+    def __call__(self, func):
         @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            last_ex = None
-            for i in range(attempts):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    last_ex = e
-                    time.sleep(delay * (2 ** i))
-            raise last_ex
+        def wrapper(*args, **kwargs):
+            key = (args, tuple(sorted(kwargs.items())))
+            now = time.monotonic()
+            if key in self.cache:
+                result, timestamp = self.cache[key]
+                if now - timestamp < self.ttl:
+                    return result
+            result = func(*args, **kwargs)
+            self.cache[key] = (result, now)
+            return result
         return wrapper
-    return decorator
 
-def compose(*funcs: Callable) -> Callable:
-    return functools.reduce(lambda f, g: lambda x: f(g(x)), funcs)
-
-def memoize_path(func: Callable) -> Callable:
-    cache = {}
+def vectorized_processor(func):
+    """Force iterator-based execution for large datasets."""
     @functools.wraps(func)
-    def memoizer(*args):
-        if args not in cache:
-            cache[args] = func(*args)
-        return cache[args]
-    return memoizer
+    def wrapper(data_stream):
+        return map(func, data_stream)
+    return wrapper
+
+def heavy_computation_optimized(data):
+    """Bitwise manipulation for high-speed integer filtering."""
+    return [x for x in data if (x & (x - 1)) == 0]
+
+def batch_process_generator(items, size=100):
+    """Memory-efficient batch slicing using yield."""
+    for i in range(0, len(items), size):
+        yield items[i:i + size]
