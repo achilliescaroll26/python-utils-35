@@ -1,37 +1,50 @@
 import functools
 import time
+import itertools
 
-class memoize_with_expiry:
-    def __init__(self, ttl=60):
-        self.ttl = ttl
-        self.cache = {}
+def deep_flatten(nested_iterable):
+    for item in nested_iterable:
+        if isinstance(item, (list, tuple, set)):
+            yield from deep_flatten(item)
+        else:
+            yield item
 
-    def __call__(self, func):
+def retry_execution(retries=3, delay=1):
+    def decorator(func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            key = (args, tuple(sorted(kwargs.items())))
-            now = time.monotonic()
-            if key in self.cache:
-                result, timestamp = self.cache[key]
-                if now - timestamp < self.ttl:
-                    return result
-            result = func(*args, **kwargs)
-            self.cache[key] = (result, now)
+            last_ex = None
+            for i in range(retries):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_ex = e
+                    time.sleep(delay * (2 ** i))
+            raise last_ex
+        return wrapper
+    return decorator
+
+def batch_process(iterable, size):
+    iterator = iter(iterable)
+    while True:
+        batch = list(itertools.islice(iterator, size))
+        if not batch:
+            break
+        yield batch
+
+def memoize_with_expiry(timeout=300):
+    cache = {}
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args):
+            now = time.time()
+            if args in cache and (now - cache[args][1]) < timeout:
+                return cache[args][0]
+            result = func(*args)
+            cache[args] = (result, now)
             return result
         return wrapper
+    return decorator
 
-def vectorized_processor(func):
-    """Force iterator-based execution for large datasets."""
-    @functools.wraps(func)
-    def wrapper(data_stream):
-        return map(func, data_stream)
-    return wrapper
-
-def heavy_computation_optimized(data):
-    """Bitwise manipulation for high-speed integer filtering."""
-    return [x for x in data if (x & (x - 1)) == 0]
-
-def batch_process_generator(items, size=100):
-    """Memory-efficient batch slicing using yield."""
-    for i in range(0, len(items), size):
-        yield items[i:i + size]
+def identity_map(items, key_func=lambda x: x):
+    return {key_func(x): x for x in items}
