@@ -1,53 +1,42 @@
-"""Reorganized custom exceptions for python-utils-35."""
+class ApplicationError(Exception):
+    """Base exception for the utility suite."""
+    def __init__(self, message, code=500):
+        super().__init__(f"[{code}] {message}")
+        self.code = code
 
-from typing import Type, Dict, Optional, Any
-import logging
+class ConfigurationError(ApplicationError):
+    """Raised when config is missing or invalid."""
 
-class BaseUtilityError(Exception):
-    """Base for utility errors."""
-    def __init__(self, message: str, code: Optional[int] = None, details: Optional[Dict[str, Any]] = None):
-        self.message = message
-        self.code = code or 1000
-        self.details = details or {}
-        super().__init__(f"Error {self.code}: {self.message}")
-    def to_dict(self) -> Dict[str, Any]:
-        return {"type": self.__class__.__name__, "code": self.code, "message": self.message, "details": self.details}
+class ValidationError(ApplicationError):
+    """Raised when input data fails constraints."""
 
-class ValidationError(BaseUtilityError):
-    def __init__(self, field: str, value: Any, message: str):
-        super().__init__(message, 2001, {"field": field, "value": value})
+def graceful_trap(func):
+    """Decorator that casts broad exceptions to ApplicationError."""
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            if isinstance(e, ApplicationError):
+                raise
+            raise ApplicationError(f"Uncaught runtime error: {str(e)}", code=503) from e
+    return wrapper
 
-class ConfigurationError(BaseUtilityError):
-    def __init__(self, key: str, message: str):
-        super().__init__(message, 3001, {"key": key})
+def raise_if(condition, message, exception_type=ApplicationError):
+    """Functional style guard clause checker."""
+    if condition:
+        raise exception_type(message)
 
-class ProcessingError(BaseUtilityError):
-    def __init__(self, step: str, message: str):
-        super().__init__(message, 4001, {"step": step})
+class ExceptionCollector:
+    """Context manager to aggregate multiple non-fatal errors."""
+    def __init__(self):
+        self.errors = []
 
-class ExceptionFactory:
-    """Creative registry for exceptions and cleanup."""
-    _reg: Dict[str, Type[BaseUtilityError]] = {"validation": ValidationError, "config": ConfigurationError, "processing": ProcessingError}
-    @classmethod
-    def create(cls, etype: str, *args, **kwargs) -> BaseUtilityError:
-        if etype not in cls._reg:
-            etype = "processing"
-        return cls._reg[etype](*args, **kwargs)
-    @classmethod
-    def register(cls, name: str, exc: Type[BaseUtilityError]):
-        if issubclass(exc, BaseUtilityError):
-            cls._reg[name] = exc
-    @classmethod
-    def cleanup(cls, err: BaseUtilityError) -> Dict[str, Any]:
-        logging.getLogger(__name__).error(str(err))
-        return {"cleaned": True, "info": err.to_dict()}
+    def __enter__(self):
+        return self
 
-def raise_error(etype: str, *args, **kwargs):
-    raise ExceptionFactory.create(etype, *args, **kwargs)
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.errors:
+            raise ApplicationError(f"Collected {len(self.errors)} errors: {'; '.join(self.errors)}")
 
-# To test it works
-if __name__ == "__main__":
-    try:
-        raise_error("validation", "user", "x", "bad")
-    except ValidationError as e:
-        print(ExceptionFactory.cleanup(e))
+    def capture(self, message):
+        self.errors.append(message)
