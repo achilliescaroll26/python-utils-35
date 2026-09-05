@@ -1,35 +1,41 @@
-import logging
-from logging.handlers import RotatingFileHandler
-import os
+import sys
+import time
+import functools
 
-def setup_logger(name='app_logger', log_file='app.log', level=logging.INFO):
-    logger = logging.getLogger(name)
-    logger.setLevel(level)
-    
-    # Use a creative format with process context
-    formatter = logging.Formatter(
-        '%(asctime)s | %(process)d | %(levelname)-8s | %(name)s | %(message)s'
-    )
+class EnhancedLogger:
+    def __init__(self, prefix='[LOG]'):
+        self.prefix = prefix
 
-    # Unusual approach: ensure directory exists via side effect
-    log_dir = os.path.dirname(log_file)
-    if log_dir and not os.path.exists(log_dir):
-        os.makedirs(log_dir)
+    def __call__(self, func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            start = time.perf_counter()
+            result = func(*args, **kwargs)
+            end = time.perf_counter()
+            self.emit(f'{func.__name__} executed in {end - start:.4f}s')
+            return result
+        return wrapper
 
-    # Rotating handler: 5MB per file, keep 3 backups
-    handler = RotatingFileHandler(
-        log_file, 
-        maxBytes=5*1024*1024, 
-        backupCount=3
-    )
-    handler.setFormatter(formatter)
+    def emit(self, message):
+        sys.stdout.write(f'{self.prefix} {time.strftime("%H:%M:%S")} -> {message}\n')
+        sys.stdout.flush()
 
-    # Prevent duplicate handlers if re-initialized
-    if not logger.handlers:
-        logger.addHandler(handler)
-        logger.addHandler(logging.StreamHandler())
+def get_logger(name):
+    """Factory for quirky functional logging."""
+    logger = EnhancedLogger(f'[{name.upper()}]')
+    def log_info(msg):
+        logger.emit(msg)
+    return log_info
 
-    return logger
-
-# Instantiate for quick access
-app_logger = setup_logger()
+def silent_error_wrapper(fallback):
+    """Decorator for swallowing errors with style."""
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                sys.stderr.write(f'Suppressed error: {e}\n')
+                return fallback
+        return wrapper
+    return decorator
