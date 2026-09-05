@@ -1,34 +1,46 @@
-import time
 import functools
+import time
+import itertools
 
-def retry_operation(retries=3, delay=1, backoff=2):
-    """Decorator implementing exponential backoff for network operations."""
+def compose(*funcs):
+    return lambda x: functools.reduce(lambda v, f: f(v), funcs, x)
+
+def memoize_with_expiry(seconds):
     def decorator(func):
+        cache = {}
         @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            current_delay = delay
-            attempt = 0
-            while attempt < retries:
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    attempt += 1
-                    if attempt >= retries:
-                        raise e
-                    time.sleep(current_delay)
-                    current_delay *= backoff
-            return func(*args, **kwargs)
+        def wrapper(*args):
+            now = time.time()
+            if args in cache and (now - cache[args][1]) < seconds:
+                return cache[args][0]
+            result = func(*args)
+            cache[args] = (result, now)
+            return result
         return wrapper
     return decorator
 
-class NetworkSimulator:
-    def __init__(self, fail_times=2):
-        self.fail_times = fail_times
-        self.calls = 0
+def chunker(iterable, size):
+    it = iter(iterable)
+    return iter(lambda: tuple(itertools.islice(it, size)), ())
 
-    @retry_operation(retries=3, delay=0.1)
-    def unstable_request(self):
-        self.calls += 1
-        if self.calls <= self.fail_times:
-            raise ConnectionError("Temporary network glitch")
-        return "success"
+def flatten(nested_list):
+    for item in nested_list:
+        if isinstance(item, (list, tuple)):
+            yield from flatten(item)
+        else:
+            yield item
+
+def retry_on_failure(retries=3, delay=1):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            last_ex = None
+            for _ in range(retries):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_ex = e
+                    time.sleep(delay)
+            raise last_ex
+        return wrapper
+    return decorator
