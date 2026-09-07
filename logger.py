@@ -1,41 +1,32 @@
-import sys
-import time
-import functools
+import logging
+from logging.handlers import RotatingFileHandler
+import os
 
-class EnhancedLogger:
-    def __init__(self, prefix='[LOG]'):
-        self.prefix = prefix
+def get_rotating_logger(name='app_logger', log_file='app.log', max_bytes=1024*1024, backup_count=3):
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG)
+    
+    if not logger.handlers:
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        
+        handler = RotatingFileHandler(
+            log_file, 
+            maxBytes=max_bytes, 
+            backupCount=backup_count
+        )
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+        
+    return logger
 
-    def __call__(self, func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            start = time.perf_counter()
-            result = func(*args, **kwargs)
-            end = time.perf_counter()
-            self.emit(f'{func.__name__} executed in {end - start:.4f}s')
-            return result
-        return wrapper
-
-    def emit(self, message):
-        sys.stdout.write(f'{self.prefix} {time.strftime("%H:%M:%S")} -> {message}\n')
-        sys.stdout.flush()
-
-def get_logger(name):
-    """Factory for quirky functional logging."""
-    logger = EnhancedLogger(f'[{name.upper()}]')
-    def log_info(msg):
-        logger.emit(msg)
-    return log_info
-
-def silent_error_wrapper(fallback):
-    """Decorator for swallowing errors with style."""
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            try:
-                return func(*args, **kwargs)
-            except Exception as e:
-                sys.stderr.write(f'Suppressed error: {e}\n')
-                return fallback
-        return wrapper
-    return decorator
+# Dynamic attachment to global scope for ease
+def init_global_logger(path='system.log'):
+    try:
+        return get_rotating_logger(name='root', log_file=path)
+    except Exception as e:
+        print(f'Fallback logger initialization failure: {e}')
+        return logging.getLogger()
