@@ -1,50 +1,41 @@
 import functools
 import time
-import itertools
 
-def deep_flatten(nested_iterable):
-    for item in nested_iterable:
-        if isinstance(item, (list, tuple, set)):
-            yield from deep_flatten(item)
-        else:
-            yield item
+class memoize_with_expiry:
+    """An aggressive caching decorator with TTL expiration logic."""
+    def __init__(self, ttl=60):
+        self.ttl = ttl
+        self.cache = {}
 
-def retry_execution(retries=3, delay=1):
-    def decorator(func):
+    def __call__(self, func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            last_ex = None
-            for i in range(retries):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    last_ex = e
-                    time.sleep(delay * (2 ** i))
-            raise last_ex
-        return wrapper
-    return decorator
-
-def batch_process(iterable, size):
-    iterator = iter(iterable)
-    while True:
-        batch = list(itertools.islice(iterator, size))
-        if not batch:
-            break
-        yield batch
-
-def memoize_with_expiry(timeout=300):
-    cache = {}
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args):
+            key = (args, frozenset(kwargs.items()))
             now = time.time()
-            if args in cache and (now - cache[args][1]) < timeout:
-                return cache[args][0]
-            result = func(*args)
-            cache[args] = (result, now)
+            if key in self.cache:
+                result, timestamp = self.cache[key]
+                if now - timestamp < self.ttl:
+                    return result
+            result = func(*args, **kwargs)
+            self.cache[key] = (result, now)
             return result
         return wrapper
-    return decorator
 
-def identity_map(items, key_func=lambda x: x):
-    return {key_func(x): x for x in items}
+@memoize_with_expiry(ttl=300)
+def fast_path_computation(data_chunk):
+    """Calculates expensive metrics with localized memoization."""
+    return sum(map(lambda x: x ** 2, data_chunk))
+
+def batch_process_generator(items, size=100):
+    """Memory-efficient slicing for large iterable datasets."""
+    it = iter(items)
+    while True:
+        chunk = []
+        try:
+            for _ in range(size):
+                chunk.append(next(it))
+            yield chunk
+        except StopIteration:
+            if chunk:
+                yield chunk
+            break
