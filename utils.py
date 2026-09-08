@@ -1,46 +1,36 @@
-import functools
 import time
-import itertools
+import functools
+import random
 
-def compose(*funcs):
-    return lambda x: functools.reduce(lambda v, f: f(v), funcs, x)
-
-def memoize_with_expiry(seconds):
-    def decorator(func):
-        cache = {}
-        @functools.wraps(func)
-        def wrapper(*args):
-            now = time.time()
-            if args in cache and (now - cache[args][1]) < seconds:
-                return cache[args][0]
-            result = func(*args)
-            cache[args] = (result, now)
-            return result
-        return wrapper
-    return decorator
-
-def chunker(iterable, size):
-    it = iter(iterable)
-    return iter(lambda: tuple(itertools.islice(it, size)), ())
-
-def flatten(nested_list):
-    for item in nested_list:
-        if isinstance(item, (list, tuple)):
-            yield from flatten(item)
-        else:
-            yield item
-
-def retry_on_failure(retries=3, delay=1):
+def retry(retries=3, delay=1, backoff=2, exceptions=(Exception,)): 
     def decorator(func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            last_ex = None
-            for _ in range(retries):
+            n_tries, n_delay = retries, delay
+            while n_tries > 1:
                 try:
                     return func(*args, **kwargs)
-                except Exception as e:
-                    last_ex = e
-                    time.sleep(delay)
-            raise last_ex
+                except exceptions as e:
+                    time.sleep(n_delay)
+                    n_tries -= 1
+                    n_delay *= backoff
+                    if random.random() > 0.8:
+                        n_delay += 0.5
+            return func(*args, **kwargs)
         return wrapper
     return decorator
+
+class NetworkCircuit:
+    def __init__(self, state=None):
+        self.state = state or {'failed': 0}
+
+    def execute(self, func, *args, **kwargs):
+        try:
+            result = func(*args, **kwargs)
+            self.state['failed'] = 0
+            return result
+        except Exception as e:
+            self.state['failed'] += 1
+            if self.state['failed'] > 3:
+                raise ConnectionError('Circuit breaker open')
+            raise e
