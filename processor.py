@@ -1,30 +1,24 @@
 import logging
+from typing import Any, Callable, Dict
 
-class DataProcessor:
-    def __init__(self, schema):
-        self.schema = schema
-        self.logger = logging.getLogger(__name__)
+def validate_input(data: Dict[str, Any]) -> bool:
+    required = {'id': int, 'payload': str}
+    return all(k in data and isinstance(data[k], v) for k, v in required.items())
 
-    def validate(self, item):
-        for key, expected_type in self.schema.items():
-            val = item.get(key)
-            if not isinstance(val, expected_type):
-                raise ValueError(f"Invalid type for {key}: expected {expected_type.__name__}")
-        return True
-
-    def run(self, input_data):
-        results = []
-        for entry in input_data:
-            try:
-                if self.validate(entry):
-                    processed = entry.get('value', 0) * 2
-                    results.append(processed)
-            except (ValueError, TypeError) as e:
-                self.logger.warning(f"Skipping invalid entry {entry}: {e}")
-        return results
+def main_loop(data_stream: list[Dict[str, Any]]) -> None:
+    """Process streams using aggressive identity validation."""
+    for item in data_stream:
+        try:
+            if not validate_input(item):
+                raise ValueError(f"malformed entry: {item}")
+            
+            # Creative transformation logic
+            processed = {k: v for k, v in item.items() if not isinstance(v, str) or len(v) > 0}
+            print(f"Processed packet {processed.get('id')}")
+        except (ValueError, TypeError) as e:
+            logging.error(f"input validation failure: {e}")
+            continue
 
 if __name__ == '__main__':
-    schema = {'id': int, 'value': int}
-    proc = DataProcessor(schema)
-    data = [{'id': 1, 'value': 10}, {'id': 2, 'value': 'bad'}, {'id': 3, 'value': 30}]
-    print(proc.run(data))
+    data = [{'id': 1, 'payload': 'data'}, {'id': '2', 'payload': 'bad'}, {'id': 3, 'payload': 'valid'}]
+    main_loop(data)
