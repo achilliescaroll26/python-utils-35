@@ -1,24 +1,42 @@
-import logging
-from typing import Any, Callable, Dict
+import functools
+from typing import Any, Callable, Iterable, Union
 
-def validate_input(data: Dict[str, Any]) -> bool:
-    required = {'id': int, 'payload': str}
-    return all(k in data and isinstance(data[k], v) for k, v in required.items())
+class DataTransformer:
+    """An unconventional pipe-based data transformation engine."""
+    def __init__(self, data: Any):
+        self._data = data
 
-def main_loop(data_stream: list[Dict[str, Any]]) -> None:
-    """Process streams using aggressive identity validation."""
-    for item in data_stream:
-        try:
-            if not validate_input(item):
-                raise ValueError(f"malformed entry: {item}")
-            
-            # Creative transformation logic
-            processed = {k: v for k, v in item.items() if not isinstance(v, str) or len(v) > 0}
-            print(f"Processed packet {processed.get('id')}")
-        except (ValueError, TypeError) as e:
-            logging.error(f"input validation failure: {e}")
-            continue
+    def apply(self, *funcs: Callable[[Any], Any]) -> 'DataTransformer':
+        for f in funcs:
+            self._data = f(self._data)
+        return self
 
-if __name__ == '__main__':
-    data = [{'id': 1, 'payload': 'data'}, {'id': '2', 'payload': 'bad'}, {'id': 3, 'payload': 'valid'}]
-    main_loop(data)
+    def result(self) -> Any:
+        return self._data
+
+    def __or__(self, func: Callable[[Any], Any]) -> 'DataTransformer':
+        return self.apply(func)
+
+def flatten_recursive(data: Iterable) -> list:
+    """Flattens nested structures using recursive generator yields."""
+    items = []
+    for item in data:
+        if isinstance(item, (list, tuple, set)):
+            items.extend(flatten_recursive(item))
+        else:
+            items.append(item)
+    return items
+
+def batch_process(data: Iterable, batch_size: int = 10) -> Iterable:
+    """Memory-efficient batch slicing for large datasets."""
+    it = iter(data)
+    while True:
+        batch = [next(it, None) for _ in range(batch_size)]
+        batch = [x for x in batch if x is not None]
+        if not batch:
+            break
+        yield batch
+
+def pipeline(initial: Any, *funcs: Callable) -> Any:
+    """Functional entry point for data processing chains."""
+    return functools.reduce(lambda acc, f: f(acc), funcs, initial)
