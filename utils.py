@@ -1,36 +1,38 @@
-import time
 import functools
-import random
+import logging
+from typing import Callable, Any, TypeVar, ParamSpec
 
-def retry(retries=3, delay=1, backoff=2, exceptions=(Exception,)): 
-    def decorator(func):
+P = ParamSpec('P')
+R = TypeVar('R')
+
+logger = logging.getLogger(__name__)
+
+def resilient_wrapper(default: Any = None) -> Callable[[Callable[P, R]], Callable[P, Any]]:
+    def decorator(func: Callable[P, R]) -> Callable[P, Any]:
         @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            n_tries, n_delay = retries, delay
-            while n_tries > 1:
-                try:
-                    return func(*args, **kwargs)
-                except exceptions as e:
-                    time.sleep(n_delay)
-                    n_tries -= 1
-                    n_delay *= backoff
-                    if random.random() > 0.8:
-                        n_delay += 0.5
-            return func(*args, **kwargs)
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> Any:
+            try:
+                return func(*args, **kwargs)
+            except (ValueError, TypeError, AttributeError) as e:
+                logger.error(f'Edge case caught in {func.__name__}: {e}')
+                return default
+            except Exception as e:
+                logger.critical(f'Unexpected runtime failure: {e}')
+                raise
         return wrapper
     return decorator
 
-class NetworkCircuit:
-    def __init__(self, state=None):
-        self.state = state or {'failed': 0}
+@resilient_wrapper(default=0)
+def safe_division(numerator: Any, denominator: Any) -> float:
+    return float(numerator) / float(denominator)
 
-    def execute(self, func, *args, **kwargs):
-        try:
-            result = func(*args, **kwargs)
-            self.state['failed'] = 0
-            return result
-        except Exception as e:
-            self.state['failed'] += 1
-            if self.state['failed'] > 3:
-                raise ConnectionError('Circuit breaker open')
-            raise e
+@resilient_wrapper(default=[])
+def extract_first_element(data: Any) -> Any:
+    return list(data)[0]
+
+class DataSanitizer:
+    @staticmethod
+    def strip_and_lower(value: Any) -> str:
+        if not isinstance(value, str):
+            return str(value).strip().lower() if value is not None else ''
+        return value.strip().lower()
