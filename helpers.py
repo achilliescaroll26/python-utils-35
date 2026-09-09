@@ -1,41 +1,42 @@
 import functools
-import time
+import logging
+from typing import Callable, Any, Type, Union
 
-class memoize_with_expiry:
-    """An aggressive caching decorator with TTL expiration logic."""
-    def __init__(self, ttl=60):
-        self.ttl = ttl
-        self.cache = {}
+logger = logging.getLogger(__name__)
 
-    def __call__(self, func):
+def resilient_execution(default_value: Any = None, exceptions: Union[Type[Exception], tuple] = (Exception,)):
+    """Decorator for graceful failure handling using functional trapping."""
+    def decorator(func: Callable):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            key = (args, frozenset(kwargs.items()))
-            now = time.time()
-            if key in self.cache:
-                result, timestamp = self.cache[key]
-                if now - timestamp < self.ttl:
-                    return result
-            result = func(*args, **kwargs)
-            self.cache[key] = (result, now)
-            return result
+            try:
+                return func(*args, **kwargs)
+            except exceptions as e:
+                logger.error(f"caught {type(e).__name__} in {func.__name__}: {e}")
+                return default_value
         return wrapper
+    return decorator
 
-@memoize_with_expiry(ttl=300)
-def fast_path_computation(data_chunk):
-    """Calculates expensive metrics with localized memoization."""
-    return sum(map(lambda x: x ** 2, data_chunk))
+def safe_dict_get(data: dict, path: str, default: Any = None):
+    """Deep key retrieval with path-based traversal and fallback."""
+    keys = path.split('.')
+    try:
+        current = data
+        for key in keys:
+            current = current[key]
+        return current
+    except (KeyError, TypeError, AttributeError):
+        return default
 
-def batch_process_generator(items, size=100):
-    """Memory-efficient slicing for large iterable datasets."""
-    it = iter(items)
-    while True:
-        chunk = []
-        try:
-            for _ in range(size):
-                chunk.append(next(it))
-            yield chunk
-        except StopIteration:
-            if chunk:
-                yield chunk
-            break
+class EdgeCaseHandler:
+    """Context manager for suppressing specific execution edge cases."""
+    def __init__(self, suppress: Union[Type[Exception], tuple] = Exception):
+        self.suppress = suppress
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type and issubclass(exc_type, self.suppress):
+            return True
+        return False
