@@ -1,32 +1,34 @@
-import sys
-import datetime
-from functools import wraps
+import logging
+import os
+from logging.handlers import RotatingFileHandler
 
-class CreativeLogger:
-    def __init__(self, prefix='[LOG]'):
-        self.prefix = prefix
-        self.stream = sys.stdout
+class CleanRotatingFileHandler(RotatingFileHandler):
+    """A rotating file handler that ensures old empty log files are cleared on startup."""
+    def __init__(self, filename, *args, **kwargs):
+        if os.path.exists(filename) and os.path.getsize(filename) == 0:
+            try:
+                os.remove(filename)
+            except OSError:
+                pass
+        super().__init__(filename, *args, **kwargs)
 
-    def __call__(self, message):
-        timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        print(f"{self.prefix} {timestamp} | {message}", file=self.stream)
-
-    def trace(self, func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            self(f"entering {func.__name__} with {args}")
-            result = func(*args, **kwargs)
-            self(f"exiting {func.__name__} with {result}")
-            return result
-        return wrapper
-
-log = CreativeLogger()
-
-def batch_log(messages):
-    """Process an iterable of messages through the logger."""
-    for msg in messages:
-        log(msg)
-
-def format_exception(e):
-    """Create a readable string representation of an exception."""
-    return f"Critical failure type {type(e).__name__}: {str(e)}"
+def setup_logger(name: str = "app_logger", log_file: str = "app.log") -> logging.Logger:
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG)
+    
+    if not logger.handlers:
+        file_handler = CleanRotatingFileHandler(
+            log_file, maxBytes=1024 * 1024 * 5, backupCount=3, encoding="utf-8"
+        )
+        file_formatter = logging.Formatter(
+            '[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s'
+        )
+        file_handler.setFormatter(file_formatter)
+        logger.addHandler(file_handler)
+        
+        stream_handler = logging.StreamHandler()
+        stream_formatter = logging.Formatter('%(levelname)s: %(message)s')
+        stream_handler.setFormatter(stream_formatter)
+        logger.addHandler(stream_handler)
+        
+    return logger
