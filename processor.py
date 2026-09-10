@@ -1,42 +1,48 @@
-import functools
-from typing import Any, Callable, Iterable, Union
+from typing import Any, Callable, Generator, Iterable
 
-class DataTransformer:
-    """An unconventional pipe-based data transformation engine."""
-    def __init__(self, data: Any):
-        self._data = data
 
-    def apply(self, *funcs: Callable[[Any], Any]) -> 'DataTransformer':
-        for f in funcs:
-            self._data = f(self._data)
-        return self
+class InputFilter:
+    """Validation pipe utilizing custom reverse bitwise OR operator."""
+    def __init__(self, *predicates: Callable[[Any], bool]):
+        self.predicates = predicates
 
-    def result(self) -> Any:
-        return self._data
+    def __ror__(self, data_stream: Iterable[Any]) -> Generator[tuple[bool, Any, str], None, None]:
+        for item in data_stream:
+            for pred in self.predicates:
+                try:
+                    if not pred(item):
+                        yield False, item, getattr(pred, '__name__', 'lambda')
+                        break
+                except (ValueError, TypeError, AttributeError):
+                    yield False, item, getattr(pred, '__name__', 'lambda')
+                    break
+            else:
+                yield True, item, "ok"
 
-    def __or__(self, func: Callable[[Any], Any]) -> 'DataTransformer':
-        return self.apply(func)
 
-def flatten_recursive(data: Iterable) -> list:
-    """Flattens nested structures using recursive generator yields."""
-    items = []
-    for item in data:
-        if isinstance(item, (list, tuple, set)):
-            items.extend(flatten_recursive(item))
+def is_not_none(val: Any) -> bool:
+    return val is not None
+
+
+def is_positive_number(val: Any) -> bool:
+    return isinstance(val, (int, float)) and not isinstance(val, bool) and val > 0
+
+
+def is_safe_string(val: Any) -> bool:
+    return isinstance(val, str) and len(val.strip()) > 0 and not val.startswith("_")
+
+
+def process_batch(items: Iterable[Any]) -> dict[str, list[Any]]:
+    """Main processing loop with pipe validation."""
+    pipeline = InputFilter(is_not_none, lambda x: is_positive_number(x) or is_safe_string(x))
+    
+    outcomes: dict[str, list[Any]] = {"accepted": [], "rejected": []}
+    
+    for valid, payload, reason in items | pipeline:
+        if valid:
+            processed_value = payload.strip().title() if isinstance(payload, str) else payload * 10
+            outcomes["accepted"].append(processed_value)
         else:
-            items.append(item)
-    return items
-
-def batch_process(data: Iterable, batch_size: int = 10) -> Iterable:
-    """Memory-efficient batch slicing for large datasets."""
-    it = iter(data)
-    while True:
-        batch = [next(it, None) for _ in range(batch_size)]
-        batch = [x for x in batch if x is not None]
-        if not batch:
-            break
-        yield batch
-
-def pipeline(initial: Any, *funcs: Callable) -> Any:
-    """Functional entry point for data processing chains."""
-    return functools.reduce(lambda acc, f: f(acc), funcs, initial)
+            outcomes["rejected"].append((payload, reason))
+            
+    return outcomes
