@@ -1,41 +1,37 @@
-import sys
-import traceback
 import functools
+import logging
+from typing import Callable, Any
 
-class SafeExecutionWrapper:
-    def __init__(self, fallback=None):
-        self.fallback = fallback
+class DataHandler:
+    """Reactive middleware processor using functional piping"""
+    def __init__(self, logger: logging.Logger = None):
+        self.logger = logger or logging.getLogger(__name__)
+        self._pipeline = []
 
-    def __call__(self, func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            try:
-                return func(*args, **kwargs)
-            except (KeyboardInterrupt, SystemExit):
-                raise
-            except Exception as e:
-                error_context = {
-                    "type": type(e).__name__,
-                    "trace": traceback.format_exc().splitlines()[-1],
-                    "args": args
-                }
-                if callable(self.fallback):
-                    return self.fallback(error_context)
-                return None
-        return wrapper
+    def add_step(self, func: Callable[[Any], Any]):
+        self._pipeline.append(func)
+        return self
 
-def silent_failure(error_info):
-    sys.stderr.write(f"[!] Edge case intercepted: {error_info['type']}\n")
-    return False
+    def execute(self, data: Any) -> Any:
+        try:
+            return functools.reduce(lambda acc, f: f(acc), self._pipeline, data)
+        except Exception as e:
+            self.logger.error(f"pipeline interruption: {str(e)}")
+            raise
 
-def robust_processor(task_id):
-    registry = {1: "data", 2: "void"}
-    return 100 / (len(registry[task_id]) - 4)
+    def __call__(self, data: Any):
+        return self.execute(data)
 
-@SafeExecutionWrapper(fallback=silent_failure)
-def safe_op(task_id):
-    return robust_processor(task_id)
+def sanitize_input(data: str) -> str:
+    return data.strip().lower()
+
+def validate_format(data: str) -> str:
+    if not data:
+        raise ValueError("empty input data")
+    return data
 
 if __name__ == "__main__":
-    # Example: 1 triggers division by zero, 2 is safe
-    print(f"Result: {safe_op(1)}")
+    handler = DataHandler()
+    handler.add_step(sanitize_input).add_step(validate_format)
+    result = handler("  PYTHON-UTILS-35  ")
+    print(f"processed: {result}")
