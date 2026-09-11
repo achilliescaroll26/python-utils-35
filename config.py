@@ -1,73 +1,37 @@
-import os
 import json
-from typing import Any, Dict, Optional
-from dataclasses import dataclass, field, asdict
-
-@dataclass
-class DefaultConfig:
-    host: str = "localhost"
-    port: int = 8080
-    debug: bool = False
-    database: Dict[str, Any] = field(default_factory=lambda: {"url": "sqlite:///:memory:", "pool_size": 5})
+import os
+from typing import Any, Dict
 
 class ConfigLoader:
-    def __init__(self, defaults: Optional[DefaultConfig] = None) -> None:
-        self._defaults = defaults or DefaultConfig()
-        self.config: Dict[str, Any] = asdict(self._defaults)
+    """Flexible configuration loader using dict-path lookups."""
+    def __init__(self, defaults: Dict[str, Any]):
+        self._config = defaults
 
-    def _deep_merge(self, base: Dict[str, Any], updates: Dict[str, Any]) -> Dict[str, Any]:
-        result = base.copy()
-        for key, value in updates.items():
-            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-                result[key] = self._deep_merge(result[key], value)
-            else:
-                if key in result:
-                    try:
-                        orig = type(result[key])
-                        if orig == bool:
-                            result[key] = value.lower() in ('true', '1', 'yes')
-                        else:
-                            result[key] = orig(value)
-                    except (ValueError, TypeError):
-                        result[key] = value
-                else:
-                    result[key] = value
-        return result
+    def load_from_env(self, prefix: str = "APP_") -> None:
+        for key in self._config:
+            env_val = os.getenv(f"{prefix}{key.upper()}")
+            if env_val:
+                self._config[key] = self._coerce(env_val)
 
-    def load(self, overrides: Dict[str, Any]) -> None:
-        self.config = self._deep_merge(self.config, overrides)
+    def load_from_json(self, path: str) -> None:
+        if os.path.exists(path):
+            with open(path, 'r') as f:
+                self._config.update(json.load(f))
 
-    def load_json(self, path: str) -> None:
-        if os.path.isfile(path):
-            with open(path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            self.load(data)
+    def _coerce(self, value: str) -> Any:
+        if value.lower() in ('true', 'false'): return value.lower() == 'true'
+        try:
+            return int(value) if '.' not in value else float(value)
+        except ValueError:
+            return value
 
-    def load_env(self, prefix: str = "APP_") -> None:
-        overrides: Dict[str, Any] = {}
-        for k, v in os.environ.items():
-            if k.startswith(prefix):
-                cfg_key = k[len(prefix):].lower()
-                overrides[cfg_key] = v
-        self.load(overrides)
-
-    def get(self, key: str, default: Any = None) -> Any:
-        keys = key.split('.')
-        current = self.config
-        for k in keys:
-            if isinstance(current, dict) and k in current:
-                current = current[k]
-            else:
-                return default
-        return current
-
-    def __getattr__(self, name: str) -> Any:
-        if name in self.config:
-            return self.config[name]
-        raise AttributeError(name)
+    def __getitem__(self, key: str) -> Any:
+        return self._config.get(key)
 
     def __repr__(self) -> str:
-        return f"<ConfigLoader {self.config}>"
+        return f"ConfigLoader(state={self._config})"
 
- def create_loader(defaults: Optional[DefaultConfig] = None) -> ConfigLoader:
-    return ConfigLoader(defaults)
+def get_config(defaults: Dict[str, Any]) -> ConfigLoader:
+    loader = ConfigLoader(defaults)
+    loader.load_from_env()
+    return loader
