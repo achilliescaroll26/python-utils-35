@@ -1,37 +1,37 @@
+import collections
 import functools
-import logging
-from typing import Callable, Any
 
-class DataHandler:
-    """Reactive middleware processor using functional piping"""
-    def __init__(self, logger: logging.Logger = None):
-        self.logger = logger or logging.getLogger(__name__)
-        self._pipeline = []
+class DataPipeline:
+    def __init__(self, processors=None):
+        self._tasks = collections.deque(processors or [])
 
-    def add_step(self, func: Callable[[Any], Any]):
-        self._pipeline.append(func)
-        return self
+    def __call__(self, data):
+        return functools.reduce(lambda d, p: p(d), self._tasks, data)
 
-    def execute(self, data: Any) -> Any:
-        try:
-            return functools.reduce(lambda acc, f: f(acc), self._pipeline, data)
-        except Exception as e:
-            self.logger.error(f"pipeline interruption: {str(e)}")
-            raise
+    def register(self, func):
+        self._tasks.append(func)
+        return func
 
-    def __call__(self, data: Any):
-        return self.execute(data)
+def sanitize_input(data):
+    return {k: v.strip() for k, v in data.items() if isinstance(v, str)}
 
-def sanitize_input(data: str) -> str:
-    return data.strip().lower()
-
-def validate_format(data: str) -> str:
-    if not data:
-        raise ValueError("empty input data")
+def validate_schema(data):
+    required = {'id', 'payload'}
+    if not required.issubset(data.keys()):
+        raise ValueError(f'missing keys: {required - data.keys()}')
     return data
 
-if __name__ == "__main__":
-    handler = DataHandler()
-    handler.add_step(sanitize_input).add_step(validate_format)
-    result = handler("  PYTHON-UTILS-35  ")
-    print(f"processed: {result}")
+class PipelineHandler:
+    def __init__(self):
+        self.pipeline = DataPipeline([sanitize_input, validate_schema])
+
+    def process(self, raw_data):
+        try:
+            return self.pipeline(raw_data)
+        except Exception as e:
+            return {'error': str(e), 'status': 'failed'}
+
+if __name__ == '__main__':
+    h = PipelineHandler()
+    result = h.process({'id': ' 101 ', 'payload': ' data '})
+    print(result)
