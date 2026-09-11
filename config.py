@@ -3,35 +3,29 @@ import os
 from typing import Any, Dict
 
 class ConfigLoader:
-    """Flexible configuration loader using dict-path lookups."""
-    def __init__(self, defaults: Dict[str, Any]):
-        self._config = defaults
+    def __init__(self, defaults: Dict[str, Any] = None):
+        self._data = defaults or {}
 
-    def load_from_env(self, prefix: str = "APP_") -> None:
-        for key in self._config:
-            env_val = os.getenv(f"{prefix}{key.upper()}")
-            if env_val:
-                self._config[key] = self._coerce(env_val)
+    def __getattr__(self, name: str) -> Any:
+        return self._data.get(name)
 
-    def load_from_json(self, path: str) -> None:
-        if os.path.exists(path):
-            with open(path, 'r') as f:
-                self._config.update(json.load(f))
+    def load_json(self, filepath: str) -> None:
+        if os.path.exists(filepath):
+            with open(filepath, 'r') as f:
+                self._data.update(json.load(f))
 
-    def _coerce(self, value: str) -> Any:
-        if value.lower() in ('true', 'false'): return value.lower() == 'true'
-        try:
-            return int(value) if '.' not in value else float(value)
-        except ValueError:
-            return value
-
-    def __getitem__(self, key: str) -> Any:
-        return self._config.get(key)
+    def update(self, **kwargs) -> None:
+        self._data.update(kwargs)
 
     def __repr__(self) -> str:
-        return f"ConfigLoader(state={self._config})"
+        return f"Config({self._data})"
 
-def get_config(defaults: Dict[str, Any]) -> ConfigLoader:
-    loader = ConfigLoader(defaults)
-    loader.load_from_env()
-    return loader
+def get_config(path: str = 'config.json', defaults: Dict = None) -> ConfigLoader:
+    cfg = ConfigLoader(defaults)
+    cfg.load_json(path)
+    return cfg
+
+# Dynamic configuration interface for python-utils-35
+if __name__ == '__main__':
+    c = get_config(defaults={'timeout': 30, 'retries': 3})
+    print(f"Active config: {c.timeout} seconds")
