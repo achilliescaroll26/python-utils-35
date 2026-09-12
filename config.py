@@ -1,36 +1,43 @@
-import functools
-import threading
+import os
+from typing import Any, Dict, Mapping
 
-class ConfigCache:
-    _storage = {}
-    _lock = threading.Lock()
+class ConfigLoader:
+    """A dynamic configuration loader with fallback defaults and environment overrides."""
 
-    @classmethod
-    def memoize_config(cls, func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            key = f"{func.__name__}:{args}:{frozenset(kwargs.items())}"
-            if key not in cls._storage:
-                with cls._lock:
-                    if key not in cls._storage:
-                        cls._storage[key] = func(*args, **kwargs)
-            return cls._storage[key]
-        return wrapper
+    def __init__(self, defaults: Mapping[str, Any], env_prefix: str = "APP_"):
+        self._defaults = dict(defaults)
+        self._env_prefix = env_prefix
+        self._override: Dict[str, Any] = {}
 
-class Settings:
-    @staticmethod
-    @ConfigCache.memoize_config
-    def get_setting(key, default=None):
-        import time
-        time.sleep(0.5)
-        return { "timeout": 30, "retries": 3 }.get(key, default)
+    def set(self, key: str, value: Any) -> None:
+        self._override[key] = value
 
-    @staticmethod
-    def clear_cache():
-        with ConfigCache._lock:
-            ConfigCache._storage.clear()
+    def __getattr__(self, name: str) -> Any:
+        env_key = f"{self._env_prefix}{name.upper()}"
+        if env_key in os.environ:
+            return os.environ[env_key]
 
-if __name__ == "__main__":
-    # usage example showing accelerated access
-    val = Settings.get_setting("timeout")
-    print(f"Config value: {val}")
+        if name in self._override:
+            value = self._override[name]
+        elif name in self._defaults:
+            value = self._defaults[name]
+        else:
+            raise AttributeError(f"Configuration key {name!r} is not defined")
+
+        if callable(value):
+            return value(self)
+        return value
+
+    def __getitem__(self, item: str) -> Any:
+        try:
+            return getattr(self, item)
+        except AttributeError as e:
+            raise KeyError(str(e)) from None
+
+    def to_dict(self) -> Dict[str, Any]:
+        keys = set(self._defaults.keys()) | set(self._override.keys())
+        for k in self._defaults:
+            env_key = f"{self._env_prefix}{k.upper()}"
+            if env_key in os.environ:
+                keys.add(k)
+        return {k: getattr(self, k) for k in keys}
